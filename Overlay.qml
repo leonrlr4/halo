@@ -313,7 +313,7 @@ Item {
     Rectangle {
       id: card
       width: Math.min(Style.space(780), panel.width - Style.gapsOut * 2)
-      height: Math.min(Style.space(640), panel.height - Style.gapsOut * 2)
+      height: Math.min(Style.space(560), panel.height - Style.gapsOut * 2)
       anchors.centerIn: parent
       color: root.bg
       radius: Math.max(Style.cornerRadius, 14)

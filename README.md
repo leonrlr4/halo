@@ -8,6 +8,8 @@ effects, and the colors of your Omarchy theme, following it as you switch.
 Halo talks to TP-Link Tapo and Kasa lights and plugs directly on your local
 network. There is no cloud relay and no Home Assistant.
 
+![Halo](preview.png)
+
 ## What it does
 
 **Color and white.** A hue and saturation wheel, a white temperature slider
