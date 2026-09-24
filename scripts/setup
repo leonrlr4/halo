@@ -1,0 +1,178 @@
+#!/usr/bin/bash
+# Install what Halo needs outside its own folder, and say what it changed.
+#
+#   scripts/setup [--check] [--quiet] [--key "SUPER + SHIFT + L"] [--no-key] [--no-enable]
+#
+# Four things, each checked before it is changed, so this can be re-run at any
+# time and --check changes nothing (exit 1 when something is missing):
+#
+#   1. a private Python environment with python-kasa, in ~/.local/share
+#   2. the plugin enabled in the Omarchy shell
+#   3. a key in ~/.config/hypr/bindings.lua that opens the panel
+#   4. a theme-set hook, so "Follow theme changes" works with the panel closed
+#
+# Run it by hand from a settled session, never from a boot hook: enabling a
+# plugin is a settings write, and one made while the shell is still loading
+# shell.json persists the factory defaults over the user's whole config.
+set -uo pipefail
+
+# A fixed PATH, not whatever the caller exported: the venv below must be built
+# from the system Python, not a pyenv/mise/conda one that can vanish later
+# and take the environment with it.
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/share/omarchy/bin"
+
+ID="leonrlr4.halo"
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+DATA="${XDG_DATA_HOME:-$HOME/.local/share}/$ID"
+VENV="$DATA/venv"
+BINDINGS="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua"
+HOOK="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/theme-set.d/$ID"
+
+# python-kasa, pinned to the commit from PR #1592 (TPAP support). Recent Tapo
+# firmware (L920 1.4.x and others) speaks only TPAP, and no release of
+# python-kasa does yet. Replace with a version number once it is released.
+KASA="python-kasa @ git+https://github.com/ZeliardM/python-kasa@e7084472972f08f2e2235b342f3964aedbfaeb3b"
+
+CHECK=0
+QUIET=0
+KEY="SUPER + SHIFT + L"
+WANT_KEY=1
+WANT_ENABLE=1
+
+need_value() { (($# >= 2)) || { echo "setup: $1 needs a value" >&2; exit 2; }; }
+
+while (($#)); do
+  case "$1" in
+    --check) CHECK=1; shift ;;
+    --quiet) QUIET=1; shift ;;
+    --key) need_value "$@"; KEY="$2"; shift 2 ;;
+    --no-key) WANT_KEY=0; shift ;;
+    --no-enable) WANT_ENABLE=0; shift ;;
+    -h|--help) sed -n '2,16p' "$0" | sed 's/^# \?//'; exit 0 ;;
+    *) echo "setup: unknown argument: $1" >&2; exit 2 ;;
+  esac
+done
+
+# The key is written verbatim into a quoted Lua string in bindings.lua. Only
+# Hyprland's own key grammar is let through, so nothing can close the string;
+# and no newline, which would leave it unterminated and stop the whole file
+# from parsing, taking every other binding with it.
+if [[ "$KEY" == *$'\n'* || "$KEY" == *$'\r'* ]] ||
+   [[ ! "$KEY" =~ ^[A-Za-z0-9_]+([[:blank:]]*\+[[:blank:]]*[A-Za-z0-9_]+)*$ ]]; then
+  echo "setup: not a valid key: $KEY (expected something like \"SUPER + SHIFT + L\")" >&2
+  exit 2
+fi
+
+missing=0
+changed=0
+ok()     { ((QUIET)) || printf '  \033[32m✓\033[0m %s\n' "$1"; }
+did()    { printf '  \033[33m→\033[0m %s\n' "$1"; changed=$((changed + 1)); }
+absent() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; missing=$((missing + 1)); }
+note()   { ((QUIET)) || printf '    %s\n' "$1"; }
+
+for tool in python3 git jq secret-tool; do
+  command -v "$tool" >/dev/null || { echo "setup: $tool is required" >&2; exit 1; }
+done
+command -v magick >/dev/null || note "imagemagick is not installed: wallpaper colors will be unavailable"
+
+# --- 1. the Python environment ----------------------------------------------
+# The stamp records which python-kasa the environment was built with, so a new
+# pin above rebuilds it and an unchanged one costs nothing.
+STAMP="$VENV/.halo-kasa"
+if [[ -x "$VENV/bin/python" && -f "$STAMP" && "$(cat "$STAMP")" == "$KASA" ]] &&
+   "$VENV/bin/python" -c "import kasa" 2>/dev/null; then
+  ok "python environment ready"
+elif ((CHECK)); then
+  absent "python environment missing or out of date ($VENV)"
+else
+  note "building the python environment (about a minute)…"
+  if python3 -m venv --clear "$VENV" &&
+     "$VENV/bin/pip" install --quiet --disable-pip-version-check "$KASA"; then
+    printf '%s' "$KASA" > "$STAMP"
+    did "built the python environment in $VENV"
+  else
+    absent "could not build the python environment"
+  fi
+fi
+
+# --- 2. enabled in the shell ------------------------------------------------
+if ((WANT_ENABLE)); then
+  state=$(omarchy plugin list 2>/dev/null | awk -v id="$ID" '$1 == id { print $2 }')
+  case "$state" in
+    enabled) ok "plugin enabled" ;;
+    disabled)
+      if ((CHECK)); then absent "plugin is disabled: the key is bound but opens nothing"
+      elif omarchy plugin enable "$ID" >/dev/null 2>&1; then did "enabled the plugin"
+      else absent "could not enable the plugin"
+      fi ;;
+    *) absent "plugin is not installed: clone it into ~/.config/omarchy/plugins/$ID"; exit 1 ;;
+  esac
+fi
+
+# --- 3. the key -------------------------------------------------------------
+if ((WANT_KEY)); then
+  if [[ ! -f "$BINDINGS" ]]; then
+    absent "no $BINDINGS to bind a key in"
+  elif grep -q "toggle $ID" "$BINDINGS"; then
+    ok "bound to a key in bindings.lua"
+  elif ((CHECK)); then
+    absent "no key bound in bindings.lua"
+  else
+    # Refuse a key Hyprland already uses: a second bind on the same key fires
+    # both, and a panel opening over, say, a lock screen is worse than none.
+    taken=""
+    if command -v hyprctl >/dev/null && hyprctl binds -j >/dev/null 2>&1; then
+      want_mods=$(tr '[:lower:]' '[:upper:]' <<<"${KEY% + *}" | tr -d ' ')
+      want_key=$(tr '[:lower:]' '[:upper:]' <<<"${KEY##*+}" | tr -d ' ')
+      mask=0
+      IFS=+ read -ra mods <<<"$want_mods"
+      for m in "${mods[@]}"; do
+        case "$m" in
+          SHIFT) mask=$((mask | 1)) ;; CTRL|CONTROL) mask=$((mask | 4)) ;;
+          ALT) mask=$((mask | 8)) ;; SUPER|WIN|LOGO|MOD4) mask=$((mask | 64)) ;;
+        esac
+      done
+      [[ "$want_mods" == "$want_key" ]] && mask=0
+      taken=$(hyprctl binds -j | jq -r --argjson m "$mask" --arg k "$want_key" \
+        '.[] | select(.modmask == $m and (.key | ascii_upcase) == $k) | .description // .arg' | head -1)
+    fi
+    if [[ -n "$taken" ]]; then
+      absent "$KEY is already bound ($taken); pick another with --key"
+    else
+      {
+        printf '\n-- Halo: the lights in the room.\n'
+        printf '%s\n' "o.bind(\"$KEY\", \"Lights\", \"omarchy-shell shell toggle $ID {}\")"
+      } >> "$BINDINGS"
+      did "bound $KEY in bindings.lua"
+      note "run 'hyprctl reload' to pick it up"
+    fi
+  fi
+fi
+
+# --- 4. the theme hook ------------------------------------------------------
+# Always installed; it does nothing unless "Follow theme changes" is on, and
+# checking that costs one JSON read. Detached, so switching themes never waits
+# the two seconds a light takes to answer.
+hook_body="# Halo: repaint the lights in the new theme's colors when \"Follow theme changes\" is on.
+setsid -f \"$HERE/bin/halo\" theme-sync >/dev/null 2>&1 </dev/null"
+if [[ -f "$HOOK" && "$(cat "$HOOK")" == "$hook_body" ]]; then
+  ok "theme hook installed"
+elif ((CHECK)); then
+  absent "theme hook missing ($HOOK)"
+else
+  mkdir -p "$(dirname "$HOOK")"
+  printf '%s\n' "$hook_body" > "$HOOK"
+  chmod +x "$HOOK"
+  did "installed the theme hook"
+fi
+
+if ((missing)); then
+  ((QUIET)) || echo
+  if ((CHECK)); then echo "$missing thing(s) missing. Run scripts/setup to apply them." >&2
+  else echo "$missing thing(s) could not be applied." >&2
+  fi
+  exit 1
+fi
+((QUIET)) && exit 0
+echo
+if ((changed)); then echo "Applied $changed change(s)."; else echo "Nothing to do."; fi

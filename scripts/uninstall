@@ -1,0 +1,35 @@
+#!/usr/bin/bash
+# Undo scripts/setup: the key, the theme hook, the Python environment.
+#
+#   scripts/uninstall [--keep-data]
+#
+# The config (devices, favorites) and the keyring entry are removed too unless
+# --keep-data is given. The plugin folder itself is left for
+# `omarchy plugin remove leonrlr4.halo` to delete.
+set -uo pipefail
+export PATH="/usr/local/bin:/usr/bin:/bin:/usr/share/omarchy/bin"
+
+ID="leonrlr4.halo"
+HERE=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
+KEEP=0
+[[ "${1:-}" == "--keep-data" ]] && KEEP=1
+
+"$HERE/bin/halo" stop 2>/dev/null
+
+BINDINGS="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua"
+if [[ -f "$BINDINGS" ]] && grep -q "toggle $ID" "$BINDINGS"; then
+  # The comment line setup wrote, and the bind under it.
+  sed -i "/^-- Halo: the lights in the room\.$/d; /toggle $ID/d" "$BINDINGS"
+  echo "removed the key from bindings.lua (run 'hyprctl reload')"
+fi
+
+rm -f "${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/theme-set.d/$ID" && echo "removed the theme hook"
+rm -rf "${XDG_DATA_HOME:-$HOME/.local/share}/$ID" && echo "removed the python environment"
+rm -rf "${XDG_CACHE_HOME:-$HOME/.cache}/$ID"
+
+if ((! KEEP)); then
+  CFG="${XDG_CONFIG_HOME:-$HOME/.config}/$ID"
+  account=$(jq -r '.account // empty' "$CFG/config.json" 2>/dev/null)
+  [[ -n "$account" ]] && secret-tool clear service "$ID" kind tplink account "$account" && echo "removed the password from the keyring"
+  rm -rf "$CFG" && echo "removed $CFG"
+fi

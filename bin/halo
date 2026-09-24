@@ -1,0 +1,10 @@
+#!/usr/bin/bash
+# Run halo with the private environment scripts/setup built for it.
+HERE=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
+PY="${XDG_DATA_HOME:-$HOME/.local/share}/leonrlr4.halo/venv/bin/python"
+if [[ ! -x "$PY" ]]; then
+  echo "halo: not installed yet; run $HERE/scripts/setup" >&2
+  exit 1
+fi
+export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
+exec "$PY" -m halo "$@"

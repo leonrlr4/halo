@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "id": "leonrlr4.halo",
+  "name": "Halo",
+  "version": "0.1.0",
+  "author": "leonrlr4",
+  "license": "MIT",
+  "description": "Your TP-Link Tapo lights from a hotkey: color, white, per-segment gradients on light strips, and the colors of your Omarchy theme, following it as you switch. Local network only, and nothing runs while the panel is closed.",
+  "kinds": [
+    "overlay"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Overlay.qml"
+  }
+}
