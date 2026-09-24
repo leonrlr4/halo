@@ -185,7 +185,12 @@ def wallpaper_colors(path: Path = WALLPAPER, count: int = 16) -> list[str]:
         return []
     try:
         out = subprocess.run(
-            ["magick", str(target) + "[0]", "-resize", "64x64", "-colors", str(count),
+            # Limits first: a wallpaper can be any file the user points
+            # the link at, and ImageMagick otherwise decodes whatever it is
+            # told, however large.
+            ["/usr/bin/magick", "-limit", "memory", "256MiB", "-limit", "map", "512MiB",
+             "-limit", "disk", "0", "-limit", "time", "10",
+             str(target) + "[0]", "-resize", "64x64", "-colors", str(count),
              "-format", "%c", "histogram:info:-"],
             capture_output=True, text=True, timeout=10, check=True,
         ).stdout

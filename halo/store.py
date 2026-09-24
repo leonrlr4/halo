@@ -93,13 +93,15 @@ def save_state(state: dict) -> None:
 # ---- keyring ---------------------------------------------------------------
 
 _ATTRS = ["service", ID, "kind", "tplink"]
+# By absolute path: the daemon may have been started from anywhere.
+SECRET_TOOL = "/usr/bin/secret-tool"
 
 
 def get_password(account: str) -> str | None:
     if not account:
         return None
     try:
-        r = subprocess.run(["secret-tool", "lookup", *_ATTRS, "account", account],
+        r = subprocess.run([SECRET_TOOL, "lookup", *_ATTRS, "account", account],
                            capture_output=True, text=True, timeout=10)
     except (OSError, subprocess.SubprocessError):
         return None
@@ -109,6 +111,6 @@ def get_password(account: str) -> str | None:
 def set_password(account: str, password: str) -> None:
     # The password goes in on stdin, never argv: argv is readable by every
     # process on the machine through /proc.
-    subprocess.run(["secret-tool", "store", "--label", "Halo: TP-Link account",
+    subprocess.run([SECRET_TOOL, "store", "--label", "Halo: TP-Link account",
                     *_ATTRS, "account", account],
                    input=password, text=True, timeout=30, check=True)

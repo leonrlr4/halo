@@ -67,8 +67,14 @@ account, so this is required even though nothing goes through TP-Link's
 servers. The password is stored in your desktop keyring (via `secret-tool`),
 never in a file. Halo then scans the network and lists the lights it finds.
 
-Requires `python`, `git`, `jq` and `secret-tool` (libsecret), all present on
-a stock Omarchy install. ImageMagick is needed for wallpaper colors.
+Requires `python`, `jq` and `secret-tool` (libsecret), all present on a
+stock Omarchy install. ImageMagick is needed for wallpaper colors.
+
+Setup downloads python-kasa (GPL-3.0) and its dependencies into
+`~/.local/share/leonrlr4.halo/venv`; nothing is bundled here. Every package is
+pinned by version and sha256 in `requirements/`, and pip runs with
+`--require-hashes --isolated`, so a changed or substituted download fails the
+install instead of running. `scripts/lock` regenerates those files.
 
 ## From a terminal or another key
 

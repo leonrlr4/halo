@@ -94,10 +94,19 @@ Item {
   }
 
   // Detached with setsid, so the daemon is not a child of the shell: it must
-  // outlive this panel, and die on its own schedule, not the shell's.
+  // outlive this panel, and die on its own schedule, not the shell's. Every
+  // program is named by absolute path; the shell's PATH is not ours.
+  // setsid -f returns as soon as it has forked, so this process lives for
+  // milliseconds; the watchdog is for the case where it does not.
   Process {
     id: starter
-    command: ["bash", "-c", 'setsid -f "$0" daemon >/dev/null 2>&1 </dev/null', root.pluginDir + "/bin/halo"]
+    command: ["/usr/bin/bash", "-c", '/usr/bin/setsid -f "$0" daemon >/dev/null 2>&1 </dev/null',
+              root.pluginDir + "/bin/halo"]
+  }
+  Timer {
+    interval: 10000
+    running: starter.running
+    onTriggered: starter.running = false
   }
 
   Timer {

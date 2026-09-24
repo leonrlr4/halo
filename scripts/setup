@@ -28,10 +28,13 @@ VENV="$DATA/venv"
 BINDINGS="${XDG_CONFIG_HOME:-$HOME/.config}/hypr/bindings.lua"
 HOOK="${XDG_CONFIG_HOME:-$HOME/.config}/omarchy/hooks/theme-set.d/$ID"
 
-# python-kasa, pinned to the commit from PR #1592 (TPAP support). Recent Tapo
-# firmware (L920 1.4.x and others) speaks only TPAP, and no release of
-# python-kasa does yet. Replace with a version number once it is released.
-KASA="python-kasa @ git+https://github.com/ZeliardM/python-kasa@e7084472972f08f2e2235b342f3964aedbfaeb3b"
+# Every package is pinned with its sha256 in requirements/ (see scripts/lock),
+# and pip is run with --require-hashes and --isolated, so what gets installed
+# is exactly what was tested, whatever pip.conf or PIP_* variables say.
+# python-kasa comes from the commit of PR #1592 (TPAP), which recent Tapo
+# firmware requires and no release supports yet.
+BUILD_REQ="$HERE/requirements/build.txt"
+RUNTIME_REQ="$HERE/requirements/runtime.txt"
 
 CHECK=0
 QUIET=0
@@ -70,25 +73,31 @@ did()    { printf '  \033[33m→\033[0m %s\n' "$1"; changed=$((changed + 1)); }
 absent() { printf '  \033[31m✗\033[0m %s\n' "$1" >&2; missing=$((missing + 1)); }
 note()   { ((QUIET)) || printf '    %s\n' "$1"; }
 
-for tool in python3 git jq secret-tool; do
+for tool in python3 jq secret-tool sha256sum; do
   command -v "$tool" >/dev/null || { echo "setup: $tool is required" >&2; exit 1; }
 done
 command -v magick >/dev/null || note "imagemagick is not installed: wallpaper colors will be unavailable"
 
 # --- 1. the Python environment ----------------------------------------------
-# The stamp records which python-kasa the environment was built with, so a new
-# pin above rebuilds it and an unchanged one costs nothing.
-STAMP="$VENV/.halo-kasa"
-if [[ -x "$VENV/bin/python" && -f "$STAMP" && "$(cat "$STAMP")" == "$KASA" ]] &&
+# The stamp is the hash of both requirement files, so changed pins rebuild the
+# environment and unchanged ones cost nothing.
+STAMP="$VENV/.halo-requirements"
+want=$(cat "$BUILD_REQ" "$RUNTIME_REQ" | sha256sum | cut -d' ' -f1)
+pip() { "$VENV/bin/python" -m pip --isolated --disable-pip-version-check --quiet "$@"; }
+if [[ -x "$VENV/bin/python" && -f "$STAMP" && "$(cat "$STAMP")" == "$want" ]] &&
    "$VENV/bin/python" -c "import kasa" 2>/dev/null; then
   ok "python environment ready"
 elif ((CHECK)); then
   absent "python environment missing or out of date ($VENV)"
 else
   note "building the python environment (about a minute)…"
+  # Build tools first, hashed like everything else, so python-kasa's sdist is
+  # built with --no-build-isolation against them rather than against
+  # whatever pip would otherwise fetch, unhashed, into a throwaway env.
   if python3 -m venv --clear "$VENV" &&
-     "$VENV/bin/pip" install --quiet --disable-pip-version-check "$KASA"; then
-    printf '%s' "$KASA" > "$STAMP"
+     pip install --require-hashes --no-deps -r "$BUILD_REQ" &&
+     pip install --require-hashes --no-deps --no-build-isolation -r "$RUNTIME_REQ"; then
+    printf '%s' "$want" > "$STAMP"
     did "built the python environment in $VENV"
   else
     absent "could not build the python environment"
@@ -154,16 +163,18 @@ fi
 # checking that costs one JSON read. Detached, so switching themes never waits
 # the two seconds a light takes to answer.
 hook_body="# Halo: repaint the lights in the new theme's colors when \"Follow theme changes\" is on.
-setsid -f \"$HERE/bin/halo\" theme-sync >/dev/null 2>&1 </dev/null"
-if [[ -f "$HOOK" && "$(cat "$HOOK")" == "$hook_body" ]]; then
+/usr/bin/setsid -f \"$HERE/bin/halo\" theme-sync >/dev/null 2>&1 </dev/null"
+if [[ -f "$HOOK" && ! -L "$HOOK" && "$(cat "$HOOK")" == "$hook_body" ]]; then
   ok "theme hook installed"
 elif ((CHECK)); then
   absent "theme hook missing ($HOOK)"
 else
+  # Staged and renamed into place: rename replaces a symlink planted at the
+  # destination instead of writing through it.
   mkdir -p "$(dirname "$HOOK")"
-  printf '%s\n' "$hook_body" > "$HOOK"
-  chmod +x "$HOOK"
-  did "installed the theme hook"
+  tmp=$(mktemp "$(dirname "$HOOK")/.halo-hook.XXXXXX") &&
+    printf '%s\n' "$hook_body" > "$tmp" && chmod 755 "$tmp" && mv -f -T "$tmp" "$HOOK" &&
+    did "installed the theme hook" || { rm -f "$tmp"; absent "could not install the theme hook"; }
 fi
 
 if ((missing)); then

@@ -82,7 +82,7 @@ def _spawn_daemon() -> None:
     log = open(store.CACHE_DIR / "daemon.log", "ab")
     # A new session, so the daemon outlives the hotkey or panel that started
     # it and is not killed with that process group.
-    subprocess.Popen([sys.executable, "-m", "halo", "daemon"], stdin=subprocess.DEVNULL,
+    subprocess.Popen([sys.executable, "-E", "-s", "-m", "halo", "daemon"], stdin=subprocess.DEVNULL,
                      stdout=log, stderr=log, start_new_session=True,
                      cwd=os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 

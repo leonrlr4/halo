@@ -1,10 +1,18 @@
 #!/usr/bin/bash
 # Run halo with the private environment scripts/setup built for it.
+#
+# A fixed PATH before anything else runs: this is started from QML, from
+# hotkeys and from a theme hook, and none of their PATHs is ours to trust.
+export PATH="/usr/local/bin:/usr/bin:/bin"
 HERE=$(cd -- "$(dirname -- "$(readlink -f -- "${BASH_SOURCE[0]}")")/.." && pwd)
 PY="${XDG_DATA_HOME:-$HOME/.local/share}/leonrlr4.halo/venv/bin/python"
 if [[ ! -x "$PY" ]]; then
   echo "halo: not installed yet; run $HERE/scripts/setup" >&2
   exit 1
 fi
-export PYTHONPATH="$HERE${PYTHONPATH:+:$PYTHONPATH}"
-exec "$PY" -m halo "$@"
+# -E -s: ignore PYTHON* variables and the user site directory, so nothing but
+# this package and the venv can be imported. The package is found because -m
+# puts the working directory first on the path, hence the cd. (-I would also
+# drop that entry.)
+cd "$HERE" || exit 1
+exec "$PY" -E -s -m halo "$@"

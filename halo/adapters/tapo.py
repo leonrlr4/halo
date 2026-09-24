@@ -204,7 +204,7 @@ class TapoAdapter(Adapter):
 
 def _local_networks() -> list[ipaddress.IPv4Network]:
     try:
-        out = subprocess.run(["ip", "-4", "-j", "addr", "show", "scope", "global"],
+        out = subprocess.run(["/usr/bin/ip", "-4", "-j", "addr", "show", "scope", "global"],
                              capture_output=True, text=True, timeout=5).stdout
         addrs = json.loads(out)
     except (OSError, ValueError, subprocess.SubprocessError):
